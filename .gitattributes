@@ -1,0 +1,2 @@
+# This reference is verified byte-for-byte in the test suite.
+tests/fixtures/synthesis_v0732.py.txt -text
