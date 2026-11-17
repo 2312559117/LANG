@@ -21,7 +21,13 @@ Tomato Tracker is an experimental, locally operated video tracking and subject-l
 
 跟踪、预览和导出在本机完成。部分效果使用视频代理，最终导出仍从原视频读取。GPU 编码取决于设备和 FFmpeg 支持，光流插帧使用 CPU 的 OpenCV DIS。
 
-## Windows 快速开始
+## 下载 Windows 便携版
+
+[下载番茄跟踪 v0.7.36（Windows x64）](https://github.com/2312559117/LANG/releases/download/v0.7.36/TomatoTracker-0.7.36-Windows-x64.zip) · [发行说明和校验文件](https://github.com/2312559117/LANG/releases/tag/v0.7.36)
+
+下载后完整解压，双击 `TomatoTracker-0.7.36.exe`。请保留 `_internal` 等文件夹；无需单独安装 Python。
+
+## Windows 源码运行
 
 准备 64 位 Windows、Python 3.12，以及可以从命令行调用的 FFmpeg 和 FFprobe。FFmpeg 需要包含 H.264 编码器（例如 libx264）；GPU 编码功能还需要对应的编码器和驱动。
 
