@@ -64,4 +64,3 @@ $env:QT_QPA_PLATFORM = 'offscreen'
 项目现有许可文件为 GPL-3.0-only，第三方材料及来源见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。**公开发布前仍需核实部分参考其他软件研究实现的再分发权限**。
 
 感谢 [lockOn](https://github.com/mo3rfan/lockOn) 和 [StableFlowPro](https://github.com/liangtovi-debug/StableFlowPro) 的开源工作，以及 Python、Qt、OpenCV、NumPy 与 FFmpeg 社区。
-
