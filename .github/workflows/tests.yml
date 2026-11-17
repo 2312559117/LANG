@@ -15,9 +15,6 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONIOENCODING: utf-8
-      LOCKFRAME_CACHE_DIR: ${{ runner.temp }}/tomato-cache
-      LOCKFRAME_LOG_DIR: ${{ runner.temp }}/tomato-logs
-      LOCKFRAME_DATA_DIR: ${{ runner.temp }}/tomato-data
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,4 +26,8 @@ jobs:
       - name: Install FFmpeg
         run: choco install ffmpeg --no-progress -y
       - name: Run tests
+        env:
+          LOCKFRAME_CACHE_DIR: ${{ runner.temp }}/tomato-cache
+          LOCKFRAME_LOG_DIR: ${{ runner.temp }}/tomato-logs
+          LOCKFRAME_DATA_DIR: ${{ runner.temp }}/tomato-data
         run: python -m pytest -q
