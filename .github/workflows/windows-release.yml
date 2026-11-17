@@ -1,0 +1,83 @@
+name: Windows portable release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/windows-release.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install -r requirements-lock.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          choco install ffmpeg --no-progress -y
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $tool = Get-ChildItem "$env:ChocolateyInstall\lib\ffmpeg\tools" -Filter ffmpeg.exe -File -Recurse |
+            Where-Object { Test-Path (Join-Path $_.DirectoryName 'ffprobe.exe') } | Select-Object -First 1
+          if (-not $tool) { throw 'Could not locate the actual FFmpeg binaries' }
+          "LOCKFRAME_FFMPEG_DIR=$($tool.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build and check portable application
+        shell: pwsh
+        env:
+          LOCKFRAME_CACHE_DIR: ${{ runner.temp }}/tomato-cache
+          LOCKFRAME_LOG_DIR: ${{ runner.temp }}/tomato-logs
+          LOCKFRAME_DATA_DIR: ${{ runner.temp }}/tomato-data
+        run: |
+          $root = Split-Path -Parent $env:LOCKFRAME_FFMPEG_DIR
+          $license = Join-Path $root 'LICENSE'
+          $readme = Join-Path $root 'README.txt'
+          $dist = Join-Path $env:RUNNER_TEMP 'tomato-release'
+          & .\build_windows.ps1 -FfmpegDirectory $env:LOCKFRAME_FFMPEG_DIR -FfmpegLicenseFile $license -FfmpegReadmeFile $readme -ReleaseName 'TomatoTracker-0.7.36' -DistPath $dist -WorkPath (Join-Path $env:RUNNER_TEMP 'tomato-build')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = Join-Path $dist 'TomatoTracker-0.7.36\TomatoTracker-0.7.36.exe'
+          Remove-Item Env:LOCKFRAME_FFMPEG_DIR
+          foreach ($check in @('self','import','diagnostics')) {
+            $output = Join-Path $env:RUNNER_TEMP "tomato-check-$check"
+            $process = Start-Process -FilePath $exe -ArgumentList @("--$check-check", ('"' + $output + '"')) -Wait -PassThru -WindowStyle Hidden
+            if ($process.ExitCode -ne 0) { throw "$check self-check failed ($($process.ExitCode))" }
+          }
+          $usage = @'
+          番茄跟踪 v0.7.36 Windows 便携版
+          请完整解压文件夹，双击 TomatoTracker-0.7.36.exe 启动。
+          请保留 _internal 等全部文件。详情请查看 README.md 和许可文件。
+          项目与问题反馈：https://github.com/2312559117/LANG
+          '@
+          [IO.File]::WriteAllText((Join-Path $dist 'TomatoTracker-0.7.36\使用说明.txt'), $usage, [Text.Encoding]::UTF8)
+          .\.venv\Scripts\python.exe packaging\create_windows_release.py $dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view v0.7.36 *> $null
+          if ($LASTEXITCODE -eq 0) { throw 'Release v0.7.36 already exists; refusing to replace its assets.' }
+          $dist = Join-Path $env:RUNNER_TEMP 'tomato-release'
+          $notes = Join-Path $env:RUNNER_TEMP 'tomato-release-notes.md'
+          @'
+          Windows x64 便携版。下载 ZIP 并完整解压，再双击 `TomatoTracker-0.7.36.exe`；请保留 `_internal` 等全部文件。
+
+          程序通过合成素材基础、导入和诊断自检。复杂遮挡、长镜头与不同设备仍需实际验证。
+
+          附件提供 SHA-256 校验文件。第三方来源和许可见仓库和压缩包；部分参考其他软件研究实现的公开再分发权限仍待核实。
+          '@ | Set-Content -LiteralPath $notes -Encoding utf8
+          gh release create v0.7.36 (Join-Path $dist 'TomatoTracker-0.7.36-Windows-x64.zip') (Join-Path $dist 'SHA256SUMS.txt') --target $env:GITHUB_SHA --title '番茄跟踪 v0.7.36 Windows 便携版' --notes-file $notes
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
