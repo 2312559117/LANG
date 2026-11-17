@@ -1,0 +1,103 @@
+"""Bidirectional backward warps on native YUV planes, Keys cubic a=-0.75."""
+import math
+import cv2
+import numpy as np
+from .frame import YuvFrame
+
+
+class FlowError(RuntimeError):
+    pass
+
+
+def check_cancel(cancel):
+    if cancel is not None and cancel.is_set():
+        from ..media import Cancelled
+        raise Cancelled()
+
+
+def matching_frames(left, right):
+    if not isinstance(left, YuvFrame) or not isinstance(right, YuvFrame):
+        raise ValueError("光流插帧要求原生YUV帧")
+    if left.format != right.format or (left.width, left.height) != (right.width, right.height):
+        raise ValueError("光流插帧要求左右原生YUV位深、布局和尺寸一致")
+
+
+def validate_flow(flow, width, height):
+    array = np.asarray(flow)
+    if array.ndim != 3 or array.shape[2] != 2 or min(array.shape[:2]) < 1 or array.dtype.kind != "f":
+        raise FlowError("光流向量必须是有限浮点H×W×2数组")
+    if (not np.isfinite(array).all()
+            or np.max(np.abs(array[..., 0])) > max(1024, 8 * array.shape[1])
+            or np.max(np.abs(array[..., 1])) > max(1024, 8 * array.shape[0])):
+        raise FlowError("光流向量无效或超出安全范围")
+    return np.ascontiguousarray(array, dtype=np.float32)
+
+
+def _plane_flow(flow, width, height, first, last):
+    """Bilinear grid sampling at (pixel+.5)/scale-.5, clamped at edges."""
+    gh, gw = flow.shape[:2]
+    sx, sy = width / gw, height / gh
+    x = np.clip((np.arange(width, dtype=np.float32) + .5) / sx - .5, 0., gw - 1.)
+    y = np.clip((np.arange(first, last, dtype=np.float32) + .5) / sy - .5, 0., gh - 1.)
+    x0, y0 = x.astype(np.intp), y.astype(np.intp)
+    x1, y1 = np.minimum(x0 + 1, gw - 1), np.minimum(y0 + 1, gh - 1)
+    wx, wy = (x - x0).astype(np.float32)[None, :, None], (y - y0).astype(np.float32)[:, None, None]
+    top = flow[y0[:, None], x0[None, :]] * (1 - wx) + flow[y0[:, None], x1[None, :]] * wx
+    bottom = flow[y1[:, None], x0[None, :]] * (1 - wx) + flow[y1[:, None], x1[None, :]] * wx
+    sampled = top * (1 - wy) + bottom * wy
+    sampled *= np.asarray([sx, sy], dtype=np.float32)
+    return sampled
+
+
+def quantize(values, fmt):
+    """Round-even storage sample, semantic-depth rounding, then left alignment."""
+    storage_max = (1 << fmt.storage_bits) - 1
+    value = np.rint(np.clip(values, 0, storage_max)).astype(np.uint32)
+    if fmt.shift:
+        value = (value + (1 << (fmt.shift - 1))) >> fmt.shift
+    value = np.minimum(value, (1 << fmt.depth) - 1)
+    if fmt.shift:
+        value = value << fmt.shift
+    return value.astype(fmt.dtype)
+
+
+def synthesize(left, right, forward, backward, alpha, *, cancel=None, tile_rows=96):
+    """Pure synthesis from supplied grid-unit flows; output keeps native format.
+
+    OpenCV's cubic image sampler uses a=-.75 and its documented fractional
+    interpolation table. This is the same cubic family, not a byte-exact claim
+    about MS's embedded floating-point OpenCL sampler.
+    """
+    matching_frames(left, right)
+    if isinstance(alpha, bool) or not isinstance(alpha, (int, float, np.floating)) or not math.isfinite(float(alpha)) or not 0 <= alpha <= 1:
+        raise ValueError("插帧时间权重必须在0–1之间")
+    check_cancel(cancel)
+    if alpha == 0:
+        return left.copy()
+    if alpha == 1:
+        return right.copy()
+    f = validate_flow(forward, left.width, left.height)
+    b = validate_flow(backward, left.width, left.height)
+    if f.shape != b.shape:
+        raise FlowError("前后向光流网格尺寸不一致")
+    if type(tile_rows) is not int or not 1 <= tile_rows <= 1024:
+        raise ValueError("插帧工作块大小无效")
+    output = []
+    for lp, rp in zip(left.planes, right.planes):
+        h, w = lp.shape
+        plane = np.empty_like(lp)
+        left_float, right_float = lp.astype(np.float32), rp.astype(np.float32)
+        for first in range(0, h, tile_rows):
+            check_cancel(cancel)
+            last = min(h, first + tile_rows)
+            x = np.broadcast_to(np.arange(w, dtype=np.float32), (last-first, w))
+            y = np.broadcast_to(np.arange(first, last, dtype=np.float32)[:, None], (last-first, w))
+            ff, bb = _plane_flow(f, w, h, first, last), _plane_flow(b, w, h, first, last)
+            l = cv2.remap(left_float, x - float(alpha)*ff[..., 0], y - float(alpha)*ff[..., 1],
+                          cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+            r = cv2.remap(right_float, x - (1-float(alpha))*bb[..., 0], y - (1-float(alpha))*bb[..., 1],
+                          cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+            plane[first:last] = quantize((1-float(alpha))*l + float(alpha)*r, left.format)
+        output.append(plane)
+    check_cancel(cancel)
+    return YuvFrame(tuple(output), left.format)

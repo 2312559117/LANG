@@ -1,0 +1,30 @@
+name: 问题反馈
+description: 报告可以复现的问题
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 请说明预期行为和实际发生的情况。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      placeholder: 按顺序写出操作步骤
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 系统与软件版本
+      placeholder: 例如 Windows 11，番茄跟踪 v0.7.36
+    validations:
+      required: true
+  - type: textarea
+    id: media
+    attributes:
+      label: 素材信息和补充说明
+      description: 可填写分辨率、帧率、时长及不含隐私的日志摘要。请勿上传密钥或私人素材。
